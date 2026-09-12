@@ -1,8 +1,7 @@
 [project]
-name = "my-project"
+name = "loop-engineering-api"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "FastAPI backend for the Loop Engineering analysis runtime."
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13.0,<2.0.0",
@@ -15,5 +14,14 @@ dependencies = [
   "python-dotenv>=1.0.1,<2.0.0",
   "reportlab>=4.0,<5.0",
   "sqlalchemy>=2.0.35,<3.0.0",
-  "uvicorn[standard]>=0.32.0,<1.0.0",
+  "uvicorn[standard]>=0.32.0,<1.0.0"
 ]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0,<9.0.0"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

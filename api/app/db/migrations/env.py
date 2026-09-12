@@ -5,6 +5,11 @@ from sqlalchemy import pool
 
 from alembic import context
 
+# ① 导入项目的配置和模型
+from app.core.config import get_settings
+from app.db import models  # noqa: F401  ← 触发所有 ORM 模型注册到 Base.metadata
+from app.db.base import Base
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -14,13 +19,18 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# ② 从 .env 读取数据库连接串，传给 Alembic
+settings = get_settings()
+config.set_main_option("sqlalchemy.url", settings.database_url)
+
+# ③ 指定 Alembic 对比哪个 metadata（Base.metadata 自动收集了全部 27 个模型）
+target_metadata = Base.metadata
+
 # add your model's MetaData object here
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from test.test04_SQLalchemy import Base
-
-target_metadata = Base.metadata
+# target_metadata = None
 
 
 # other values from the config, defined by the needs of env.py,
