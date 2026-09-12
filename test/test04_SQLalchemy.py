@@ -1,11 +1,8 @@
-from enum import unique
-
-import select
-from sqlalchemy.orm import DeclarativeMeta, Mapped, mapped_column, Session
-from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column, Session, DeclarativeBase
+from sqlalchemy import String, select
 
 
-class Base(DeclarativeMeta):
+class Base(DeclarativeBase):
     pass
 
 
@@ -19,7 +16,7 @@ class User(Base):
 # 3.创建引擎
 from sqlalchemy import create_engine
 
-engine = create_engine("mysql+pymysql://root:123456@localhost:3306/test", echo=True)
+engine = create_engine("mysql+pymysql://root:123456@localhost:3306/loop_engineering", echo=True)
 
 # 4.创建表格
 Base.metadata.create_all(engine)
@@ -27,9 +24,9 @@ Base.metadata.create_all(engine)
 # 5.创建会话
 with Session(engine) as session:
     # 5.1创建一条数据
-    # new_user = User(id='1', name='张三')
-    # session.add(new_user)
-    # session.commit()
+    new_user = User(id='1', name='张三')
+    session.add(new_user)
+    session.commit()
 
     # 5.2查询数据
     result = session.scalars(
@@ -50,7 +47,7 @@ with Session(engine) as session:
     session.flush()
 
 from sqlalchemy.orm import Session, sessionmaker
-from _collections_abc import Generator
+from collections.abc import Generator
 
 # 创建 session 工厂
 SessionLocal = sessionmaker(bind=engine, autoflush=False)

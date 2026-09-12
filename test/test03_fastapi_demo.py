@@ -7,6 +7,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 
 # ── 1. 创建应用 + CORS 中间件 ──
 app = FastAPI(title="任务管理 API")
@@ -105,3 +108,22 @@ def create_task(
 ):
     """POST /tasks {"title": "学习 FastAPI"} —— 请求体创建任务"""
     return store.add(body)
+
+
+# ── 新增 SSE 端点（追加到路由区域末尾）──
+@app.get("/tasks/stream")
+async def stream_tasks(store: TaskStore = Depends(get_store)):
+    """GET /tasks/stream —— SSE 实时推送任务列表"""
+
+    async def event_generator():
+        while True:
+            tasks = store.list_all()
+            items = [t.model_dump() for t in tasks]
+            yield f"data: {json.dumps(items)}\n\n"
+            await asyncio.sleep(2)  # 每 2 秒推送一次最新列表
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )

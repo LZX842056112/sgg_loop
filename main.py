@@ -1,5 +1,5 @@
 def main():
-    print("Hello from my-project!")
+    print("Hello from services!")
 
 
 if __name__ == "__main__":
