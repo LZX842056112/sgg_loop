@@ -47,3 +47,16 @@ class SourceRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AuditEventRead(BaseModel):
+    id: str
+    project_id: str | None
+    sequence: int
+    event_type: str
+    message: str
+    actor_id: str
+    payload_json: dict
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
