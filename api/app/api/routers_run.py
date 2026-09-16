@@ -82,3 +82,69 @@ def get_run_events(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return list_run_events(session, project_id, run_id)
+
+
+import json
+from collections.abc import Generator
+
+from fastapi.responses import StreamingResponse
+
+from app.db.session import get_worker_session_factory
+from app.services.run_events import (
+    encode_many_sse, encode_sse, list_run_events, stream_run_events_live,
+)
+
+
+def _get_run_or_404(session: Session, project_id: str, run_id: str) -> AnalysisRun:
+    run = session.get(AnalysisRun, run_id)
+    if run is None or run.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+# ── SSE 端点 ──
+
+@router.post("/runs/stream")
+def create_run_stream(
+        project_id: str,
+        session: Session = Depends(get_session),
+) -> StreamingResponse:
+    """创建运行并返回 SSE 流——适合"立即执行"的场景。"""
+    project = _get_project_or_404(session, project_id)
+    try:
+        run, _job = enqueue_run(session, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    session.commit()
+    session.expire_all()
+
+    # 轮询已写入的事件并一次性推送
+    events = list_run_events(session, project.id, run.id)
+    return StreamingResponse(
+        iter([encode_many_sse(events)]),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/runs/{run_id}/events/stream")
+def stream_run_events_endpoint(
+        project_id: str,
+        run_id: str,
+        after_sequence: int = 0,
+) -> StreamingResponse:
+    """实时 SSE 事件流——持续推送 Worker 写入的新事件。"""
+    session_factory = get_worker_session_factory()
+    with session_factory() as session:
+        _get_run_or_404(session, project_id, run_id)
+
+    return StreamingResponse(
+        stream_run_events_live(
+            session_factory,
+            project_id=project_id,
+            run_id=run_id,
+            after_sequence=after_sequence,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

@@ -67,3 +67,102 @@ def list_run_events(
             .order_by(RunEvent.sequence.asc(), RunEvent.id.asc())
         ).all()
     )
+
+
+import json
+from collections.abc import Iterable
+from time import monotonic, sleep
+
+from app.db.models import RunJob
+
+TERMINAL_RUN_EVENTS = {"run_completed", "run_failed", "run_cancelled"}
+
+
+# ── SSE 编码 ──
+
+def encode_sse_event(event: RunEvent) -> str:
+    """把 RunEvent ORM 对象编码为 SSE 帧。"""
+    payload = {
+        "id": event.id,
+        "project_id": event.project_id,
+        "run_id": event.run_id,
+        "sequence": event.sequence,
+        "created_at": event.created_at.isoformat(),
+        **event.payload_json,
+    }
+    return (
+        f"id: {event.sequence}\n"
+        f"event: {event.event_type}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    )
+
+
+def encode_sse(event_name: str, payload: dict) -> str:
+    """用指定事件名编码一条 SSE 帧。"""
+    return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def encode_many_sse(events: Iterable[RunEvent]) -> str:
+    """批量编码多条事件。"""
+    return "".join(encode_sse_event(e) for e in events)
+
+
+def encode_keepalive_sse() -> str:
+    """SSE 心跳帧——以冒号开头的行是 SSE 注释，不算事件。"""
+    return ": keepalive\n\n"
+
+
+# ── 实时流式推送 ──
+
+def run_has_active_job(session: Session, run_id: str) -> bool:
+    """检查 run 是否有排队中或运行中的 job。"""
+    return (
+            session.scalar(
+                select(RunJob.id)
+                .where(
+                    RunJob.run_id == run_id,
+                    RunJob.status.in_({"queued", "running"}),
+                )
+                .limit(1)
+            )
+            is not None
+    )
+
+
+def stream_run_events_live(
+        session_factory,
+        *,
+        project_id: str,
+        run_id: str,
+        after_sequence: int = 0,
+        poll_interval_seconds: float = 0.5,
+        keepalive_seconds: float = 10.0,
+):
+    """持续推送运行事件——每次轮询使用新 session，支持断线补发。
+
+    遇到终态事件（run_completed/run_failed/run_cancelled）直接结束；
+    没有活动 job 时也结束，避免已完成 run 一直等待。
+    """
+    last_sequence = max(0, after_sequence)
+    last_keepalive_at = monotonic()
+
+    while True:
+        with session_factory() as session:
+            events = list_run_events(session, project_id, run_id, last_sequence)
+            if events:
+                for event in events:
+                    yield encode_sse_event(event)
+                    last_sequence = event.sequence
+                    last_keepalive_at = monotonic()
+                    if event.event_type in TERMINAL_RUN_EVENTS:
+                        return
+                continue
+
+            if not run_has_active_job(session, run_id):
+                return
+
+        now = monotonic()
+        if now - last_keepalive_at >= keepalive_seconds:
+            yield encode_keepalive_sse()
+            last_keepalive_at = now
+        sleep(poll_interval_seconds)
