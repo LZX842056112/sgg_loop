@@ -37,7 +37,7 @@ def should_skip_path(file_path: Path, root: Path, max_file_bytes: int) -> dict |
 
 
 def to_relative_posix(absolute: Path, root: Path) -> str:
-    """将绝对路径转换为相对路径,统一转换为 /"""
+    """将绝对路径转换为相对路径 要求不能是快捷方式跳转 统一转换为"""
     try:
         return absolute.relative_to(root).as_posix()
     except ValueError:

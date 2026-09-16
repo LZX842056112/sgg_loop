@@ -28,7 +28,7 @@ def validate_source_input(source_type: str, uri: str) -> ValidatedSource:
     if source_type == "github_repo":
         return _validate_github_repo(uri)
     if source_type in ("local_directory", "local_file"):
-        return _validate_local_path(uri)
+        return _validate_local_path(uri, expected_kind=source_type)
     if source_type == "web_url":
         return _validate_web_url(uri)
     # 如果类型都没法匹配  直接抛出异常
@@ -59,12 +59,17 @@ def _validate_github_repo(uri: str) -> ValidatedSource:
     )
 
 
-def _validate_local_path(uri: str) -> ValidatedSource:
+def _validate_local_path(uri: str, expected_kind: str | None = None) -> ValidatedSource:
     """校验传入的本地路径是否合法"""
     # 统一转换为标准格式的绝对路径
     path = Path(uri).expanduser().resolve()
     if not path.exists():
         raise SourceValidationError(f"Path does not exist:{path}")
+    # Local_file 不能传目录,Local_directory 不能传文件
+    if expected_kind == "local_file" and not path.is_file():
+        raise SourceValidationError(f"Path is not a file:{path}")
+    if expected_kind == "local_directory" and not path.is_dir():
+        raise SourceValidationError(f"Path is not a directory:{path}")
     return ValidatedSource(normalized_uri=str(path), metadata={"absolute_path": str(path)})
 
 

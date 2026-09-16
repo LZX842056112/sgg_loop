@@ -159,18 +159,14 @@ def refresh_bundle_item_collection_state(session: Session, bundle: SourceBundle)
         if item.source is not None and item.source.status in COLLECTION_TERMINAL_STATUSES:
             item.status = item.source.status
 
-    # 只统计真正挂载了 source 的条目,未挂载 source 的 pending 条目不参与判定
-    item_statuses = [item.status for item in bundle.items if item.source is not None]
-    if not item_statuses:
-        # 没有可判定条目时保持原状态,不误判为 collected
-        pass
-    elif all(s in COLLECTION_SUCCESS_STATUSES for s in item_statuses):
-        bundle.status = "collected"
-    elif all(s == "failed" for s in item_statuses):
+    # 只对有source的条目做状态判定: failed 不能再被过滤掉，否则"成功+失败"混合会被误判为 collected;
+    # 无 source 的 pending 条目不参与判定,避免空列表 aLl([])=True 把未采集的包误判为 collected
+    items_statuses = [item.status for item in bundle.items if item.source is not None]
+    if items_statuses and all(s == "failed" for s in items_statuses):
         bundle.status = "failed"
-    else:
-        # 成功与失败混合,不能过滤掉 failed 后误判为全成功
+    elif items_statuses and all(s in COLLECTION_SUCCESS_STATUSES for s in items_statuses):
+        bundle.status = "collected"
+    elif any(s in COLLECTION_SUCCESS_STATUSES for s in items_statuses):
         bundle.status = "partial"
-
     session.flush()
     return bundle
