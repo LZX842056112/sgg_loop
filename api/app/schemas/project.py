@@ -28,3 +28,22 @@ class ProjectRead(BaseModel):
 
     # 可以让sqlalchemy的orm模型转换为pydantic模型时，从数据库中读取数据
     model_config = {"from_attributes": True}
+
+
+class SourceCreate(BaseModel):
+    source_type: str = Field(min_length=1, max_length=40)
+    uri: str = Field(min_length=1)
+
+
+class SourceRead(BaseModel):
+    id: str
+    project_id: str
+    source_type: str
+    uri: str
+    normalized_uri: str
+    status: str
+    metadata_json: dict
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
