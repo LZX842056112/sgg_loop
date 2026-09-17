@@ -86,6 +86,26 @@ def append_turn(
     return turn
 
 
+def start_run(session: Session, project: Project) -> AnalysisRun:
+    """创建并同步执行一次 Loop（用于测试和 Demo 场景）。"""
+    run = initialize_run(session, project)
+    execute_run(session, project, run)
+    return run
+
+
+def execute_run(session: Session, project: Project, run: AnalysisRun) -> None:
+    """执行一次 Loop——真实编排由 LangGraph StateGraph 负责。"""
+    # from app.engine.langgraph_runner import execute_run_graph
+
+    project_id = project.id
+    run_id = run.id
+    if not run.thread_id:
+        run.thread_id = f"run:{run.id}"
+    thread_id = run.thread_id
+    session.commit()  # 先提交 run，让 checkpoint 能引用已存在的 run
+    # execute_run_graph(session, project_id, run_id, thread_id)
+
+
 def get_run_package(session: Session, project_id: str, run_id: str) -> dict:
     """组装一次运行的完整分析包——所有产出物。"""
     run = session.get(AnalysisRun, run_id)
@@ -172,3 +192,150 @@ def resume_run(session: Session, project: Project, run: AnalysisRun) -> Analysis
     # TODO 调用 LangGraph 引擎继续执行
 
     return run
+
+
+from app.db.models import (
+    EvidenceItem, Finding, QualityScore, Question, Recommendation, Risk,
+)
+
+NODE_ORDER = [
+    "load_state",
+    "build_context",
+    "analyze_sources",
+    "llm_analyze_sources",
+    "update_analysis",
+    "verify_package",
+    "llm_verify_package",
+    "decide_next_state",
+    "persist_state",
+]
+
+
+# 查询上一轮运行的质量分（overall_score），用于计算本次的 score_delta
+def latest_previous_score(session: Session, run: AnalysisRun) -> int | None:
+    statement = (
+        select(QualityScore.overall_score)
+        .where(QualityScore.run_id == run.id)
+        .order_by(QualityScore.created_at.desc(), QualityScore.id.desc())
+    )
+    return session.scalar(statement)
+
+
+# 把分析产物 dict 持久化到 EvidenceItem/Finding/Risk/Question/Recommendation 五张表，返回落库摘要
+def persist_analysis_artifacts(
+        session: Session,
+        project: Project,
+        run: AnalysisRun,
+        analysis: dict,
+) -> dict:
+    evidence_ref_map: dict[str, str] = {}
+    persisted_evidence: list[dict] = []
+    for evidence in analysis["evidence"]:
+        item = EvidenceItem(
+            project_id=project.id,
+            run_id=run.id,
+            source_id=evidence.get("source_id"),
+            title=evidence["title"],
+            summary=evidence["summary"],
+            evidence_type=evidence["evidence_type"],
+            reference=evidence.get("reference"),
+            confidence=evidence.get("confidence", 80),
+            metadata_json=evidence.get("metadata", {}),
+        )
+        session.add(item)
+        session.flush()
+        evidence_ref_map[evidence["client_ref"]] = item.id
+        persisted_evidence.append({"id": item.id})
+
+    persisted_findings: list[dict] = []
+    for finding in analysis["findings"]:
+        evidence_refs = [evidence_ref_map[ref] for ref in finding.get("evidence_refs", []) if ref in evidence_ref_map]
+        session.add(
+            Finding(
+                project_id=project.id,
+                run_id=run.id,
+                title=finding["title"],
+                summary=finding["summary"],
+                category=finding["category"],
+                impact_level=finding["impact_level"],
+                confidence=finding.get("confidence", 75),
+                evidence_refs_json=evidence_refs,
+                metadata_json=finding.get("metadata", {}),
+            )
+        )
+        persisted_findings.append({"evidence_refs": evidence_refs})
+
+    persisted_risks: list[dict] = []
+    for risk in analysis["risks"]:
+        evidence_refs = [evidence_ref_map[ref] for ref in risk.get("evidence_refs", []) if ref in evidence_ref_map]
+        session.add(
+            Risk(
+                project_id=project.id,
+                run_id=run.id,
+                title=risk["title"],
+                summary=risk["summary"],
+                severity=risk["severity"],
+                mitigation=risk["mitigation"],
+                evidence_refs_json=evidence_refs,
+                metadata_json=risk.get("metadata", {}),
+            )
+        )
+        persisted_risks.append({"severity": risk["severity"], "mitigation": risk["mitigation"],
+                                "evidence_refs": evidence_refs})
+
+    persisted_questions: list[dict] = []
+    for question in analysis["questions"]:
+        existing_answered = find_answered_question(session, project.id, question)
+        if existing_answered is not None:
+            persisted_questions.append({"status": existing_answered.status, "impact": existing_answered.impact})
+            continue
+        session.add(
+            Question(
+                project_id=project.id,
+                run_id=run.id,
+                prompt=question["prompt"],
+                reason=question["reason"],
+                impact=question["impact"],
+                status=question.get("status", "open"),
+                metadata_json=question.get("metadata", {}),
+            )
+        )
+        persisted_questions.append({"status": question.get("status", "open"), "impact": question["impact"]})
+
+    persisted_recommendations: list[dict] = []
+    for recommendation in analysis["recommendations"]:
+        session.add(
+            Recommendation(
+                project_id=project.id,
+                run_id=run.id,
+                summary=recommendation["summary"],
+                rationale=recommendation["rationale"],
+                confidence=recommendation.get("confidence", 70),
+                next_steps_json=recommendation.get("next_steps", []),
+                metadata_json=recommendation.get("metadata", {}),
+            )
+        )
+        persisted_recommendations.append({"summary": recommendation["summary"],
+                                          "confidence": recommendation.get("confidence", 70)})
+    session.flush()
+    return {
+        "evidence": persisted_evidence,
+        "findings": persisted_findings,
+        "risks": persisted_risks,
+        "questions": persisted_questions,
+        "recommendations": persisted_recommendations,
+    }
+
+
+# 按 prompt 查找该项目已回答过的问题，避免 resume 后重复创建同一问题
+def find_answered_question(session: Session, project_id: str, question: dict) -> Question | None:
+    statement = (
+        select(Question)
+        .where(
+            Question.project_id == project_id,
+            Question.prompt == question["prompt"],
+            Question.status == "answered",
+        )
+        .order_by(Question.answered_at.desc(), Question.id.desc())
+    )
+    return session.scalar(statement)

@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
-    routers_demo, routers_events, routers_inventory, routers_llm,
-    routers_projects, routers_reports, routers_research_profiles,
-    routers_run, routers_source_bundles, routers_sources, routers_tools,
+    routers_analyzer, routers_demo, routers_events, routers_inventory,
+    routers_llm, routers_projects, routers_reports,
+    routers_research_profiles, routers_run, routers_source_bundles,
+    routers_sources, routers_tools,
 )
 from app.core.config import get_settings
 
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(routers_run.router)
     app.include_router(routers_reports.router)
     app.include_router(routers_tools.router)
+    app.include_router(routers_analyzer.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
