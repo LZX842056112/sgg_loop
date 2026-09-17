@@ -208,7 +208,8 @@ def retry_run(
     return {"run": run, "job": job}
 
 
-from app.engine.runner import resume_run  # ← 新增 import
+from app.engine.runner import resume_run
+from app.services.reports import build_analysis_package
 
 
 @router.post("/runs/{run_id}/resume", response_model=AnalysisRunRead)
@@ -227,7 +228,7 @@ def resume_existing_run(
 
     session.commit()
     session.refresh(run)
-    return run
+    return build_analysis_package(session, run)  # 追加 import
 
 
 from app.db.models import utc_now, Question
