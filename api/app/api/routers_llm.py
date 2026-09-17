@@ -155,3 +155,26 @@ def list_llm_calls(
         statement = statement.where(LLMCall.run_id == run_id)
     statement = statement.order_by(LLMCall.created_at.desc(), LLMCall.id.desc())
     return list(session.scalars(statement).all())
+
+
+# LLM 输出校验调试端点（Module 17 可测路由）
+@router.post("/analyzer/validate")
+def validate_llm_output(
+        payload: dict,
+        allowed_evidence_refs: list[str] | None = None,
+) -> dict:
+    """LLM 分析输出校验调试端点。
+
+    接收 LLM 原始输出 JSON 和允许的 evidence refs，
+    调用 `validate_llm_analysis_output()` 返回 5 层校验结果。
+
+    可用于在第 17 章完成后用 curl 直观看到校验器的拒绝原因。
+    """
+    from app.llm.analyzer import validate_llm_analysis_output
+
+    refs = set(allowed_evidence_refs or [])
+    result = validate_llm_analysis_output(payload, refs)
+    return {
+        "accepted": result.accepted,
+        "validation": result.validation,
+    }
