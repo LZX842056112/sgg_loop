@@ -84,9 +84,6 @@ def get_run_events(
     return list_run_events(session, project_id, run_id)
 
 
-import json
-from collections.abc import Generator
-
 from fastapi.responses import StreamingResponse
 
 from app.db.session import get_worker_session_factory
@@ -148,3 +145,126 @@ def stream_run_events_endpoint(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+from app.services.run_jobs import cancel_run_jobs, create_run_job
+from app.services.run_events import record_run_event
+
+
+@router.post("/runs/{run_id}/cancel", response_model=AnalysisRunRead)
+def cancel_run(
+        project_id: str,
+        run_id: str,
+        session: Session = Depends(get_session),
+) -> AnalysisRun:
+    project = _get_project_or_404(session, project_id)
+    run = _get_run_or_404(session, project_id, run_id)
+
+    # 取消所有活跃 job
+    cancel_run_jobs(session, run.id)
+
+    # 更新 run 和 project 状态
+    run.status = "cancelled"
+    run.stop_reason = "User cancelled the run."
+    project.status = "cancelled"
+
+    record_run_event(
+        session, project.id, run.id, "run_cancelled",
+        {"status": "cancelled"},
+    )
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+@router.post("/runs/{run_id}/retry", response_model=RunEnqueueRead,
+             status_code=status.HTTP_202_ACCEPTED)
+def retry_run(
+        project_id: str,
+        run_id: str,
+        session: Session = Depends(get_session),
+) -> dict:
+    project = _get_project_or_404(session, project_id)
+    run = _get_run_or_404(session, project_id, run_id)
+
+    if run.status not in {"failed", "cancelled"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Only failed or cancelled runs can be retried",
+        )
+
+    run.status = "queued"
+    run.stop_reason = None
+    project.status = "queued"
+
+    job = create_run_job(session, project.id, run.id, "retry")
+    record_run_event(
+        session, project.id, run.id, "run_retry_queued",
+        {"job_id": job.id, "status": run.status},
+    )
+    session.commit()
+    session.refresh(run)
+    session.refresh(job)
+    return {"run": run, "job": job}
+
+
+from app.engine.runner import resume_run  # ← 新增 import
+
+
+@router.post("/runs/{run_id}/resume", response_model=AnalysisRunRead)
+def resume_existing_run(
+        project_id: str,
+        run_id: str,
+        session: Session = Depends(get_session),
+) -> AnalysisRun:
+    project = _get_project_or_404(session, project_id)
+    run = _get_run_or_404(session, project_id, run_id)
+
+    try:
+        resume_run(session, project, run)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+from app.db.models import utc_now, Question
+from app.schemas.run import QuestionAnswerCreate, QuestionRead
+from app.services.audit import record_event
+
+
+@router.post("/questions/{question_id}/answer", response_model=QuestionRead)
+def answer_question(
+        project_id: str,
+        question_id: str,
+        payload: QuestionAnswerCreate,
+        session: Session = Depends(get_session),
+) -> Question:
+    project = _get_project_or_404(session, project_id)
+    question = session.get(Question, question_id)
+    if question is None or question.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    question.status = "answered"
+    question.answer_text = payload.answer_text
+    question.answered_at = utc_now()
+
+    # 特殊处理：如果问题是关于 analysis_goal 的，同步更新项目
+    if (
+            question.metadata_json.get("missing_field") == "analysis_goal"
+            and not project.analysis_goal
+    ):
+        project.analysis_goal = payload.answer_text
+
+    record_event(
+        session,
+        event_type="question.answered",
+        message="Loop question answered",
+        project_id=project.id,
+        payload={"question_id": question.id, "run_id": question.run_id},
+    )
+    session.commit()
+    session.refresh(question)
+    return question

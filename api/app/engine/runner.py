@@ -144,3 +144,31 @@ def get_run_package(session: Session, project_id: str, run_id: str) -> dict:
             ).all()
         ),
     }
+
+
+def resume_run(session: Session, project: Project, run: AnalysisRun) -> AnalysisRun:
+    """恢复暂停的运行——仅 paused_for_input 状态允许。"""
+    if run.status != "paused_for_input":
+        raise ValueError("Only paused runs can be resumed")
+
+    # 确保 thread_id 存在
+    if not run.thread_id:
+        run.thread_id = f"run:{run.id}"
+    thread_id = run.thread_id
+
+    project.status = "running"
+    run.status = "running"
+    run.resume_count += 1
+
+    record_event(
+        session,
+        event_type="run.resumed",
+        message="Loop 运行已继续",
+        project_id=project.id,
+        payload={"run_id": run.id},
+    )
+    session.commit()
+
+    # TODO 调用 LangGraph 引擎继续执行
+
+    return run
