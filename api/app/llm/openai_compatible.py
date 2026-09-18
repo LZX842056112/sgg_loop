@@ -42,7 +42,7 @@ class OpenAICompatibleClient:
     def chat(
             self,
             messages: list[dict],
-            max_tokens: int = 512,
+            max_tokens: int = 4096,
             temperature: float = 0.2,
     ) -> dict:
         if not self.is_configured():
@@ -54,6 +54,9 @@ class OpenAICompatibleClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": False,
+            "thinking": {
+                "type": "disabled"
+            }
         }
         headers = {"Content-Type": "application/json"}
         if self.api_key:

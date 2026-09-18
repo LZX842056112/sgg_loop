@@ -95,7 +95,7 @@ def start_run(session: Session, project: Project) -> AnalysisRun:
 
 def execute_run(session: Session, project: Project, run: AnalysisRun) -> None:
     """执行一次 Loop——真实编排由 LangGraph StateGraph 负责。"""
-    # from app.engine.langgraph_runner import execute_run_graph
+    from app.engine.langgraph_runner import execute_run_graph
 
     project_id = project.id
     run_id = run.id
@@ -103,7 +103,7 @@ def execute_run(session: Session, project: Project, run: AnalysisRun) -> None:
         run.thread_id = f"run:{run.id}"
     thread_id = run.thread_id
     session.commit()  # 先提交 run，让 checkpoint 能引用已存在的 run
-    # execute_run_graph(session, project_id, run_id, thread_id)
+    execute_run_graph(session, project_id, run_id, thread_id)
 
 
 def get_run_package(session: Session, project_id: str, run_id: str) -> dict:
@@ -168,6 +168,7 @@ def get_run_package(session: Session, project_id: str, run_id: str) -> dict:
 
 def resume_run(session: Session, project: Project, run: AnalysisRun) -> AnalysisRun:
     """恢复暂停的运行——仅 paused_for_input 状态允许。"""
+    from app.engine.langgraph_runner import resume_run_graph  # ← 新增
     if run.status != "paused_for_input":
         raise ValueError("Only paused runs can be resumed")
 
@@ -189,8 +190,13 @@ def resume_run(session: Session, project: Project, run: AnalysisRun) -> Analysis
     )
     session.commit()
 
-    # TODO 调用 LangGraph 引擎继续执行
-
+    resume_run_graph(
+        session,
+        project.id,
+        run.id,
+        thread_id,
+        {"run_id": run.id, "resume_count": run.resume_count},  # ← resume_payload
+    )
     return run
 
 

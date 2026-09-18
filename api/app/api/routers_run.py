@@ -9,6 +9,9 @@ from app.schemas.run import (
     AnalysisPackageRead, AnalysisRunRead, RunEnqueueRead, RunEventRead,
 )
 from app.services.run_events import list_run_events
+from app.engine.langgraph_runner import stream_run_graph_events  # ← 新增
+from app.engine.runner import initialize_run  # ← 新增
+from app.services.run_events import record_run_event
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["runs"])
 
@@ -108,14 +111,21 @@ def create_run_stream(
 ) -> StreamingResponse:
     """创建运行并返回 SSE 流——适合"立即执行"的场景。"""
     project = _get_project_or_404(session, project_id)
-    try:
-        run, _job = enqueue_run(session, project)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    run = initialize_run(session, project)  # 只建 run，不建后台 job
+    session.commit()
+    thread_id = run.thread_id or f"run:{run.id}"
+    for event_payload in stream_run_graph_events(session, project.id, run.id, thread_id):
+        record_run_event(session, project.id, run.id, "node_completed", event_payload)
+        session.commit()
+    record_run_event(
+        session,
+        project.id,
+        run.id,
+        "run_completed",
+        {"status": run.status, "turn_count": run.current_turn},
+    )
     session.commit()
     session.expire_all()
-
-    # 轮询已写入的事件并一次性推送
     events = list_run_events(session, project.id, run.id)
     return StreamingResponse(
         iter([encode_many_sse(events)]),
