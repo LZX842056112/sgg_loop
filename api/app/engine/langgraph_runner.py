@@ -19,42 +19,13 @@ from app.llm.analyzer import validate_llm_analysis_output
 from app.llm.json_tools import extract_json_object
 from app.llm.router import LLMRouter
 from app.services.audit import record_event
-
+from app.verifiers.quality import score_analysis_package
+from app.verifiers.llm_assisted import validate_llm_verifier_output
 
 # ---- Module 19 占位 ----
 # `verifiers/quality.py` 和 `verifiers/llm_assisted.py` 在 Module 19 才创建。
 # 这里先提供最小占位实现，让第 18–20 章的 LangGraph 图可以正常运行。
 # Module 19 会用文件顶部的 from import 替换掉下面的占位函数。
-
-
-def score_analysis_package(**kwargs) -> dict[str, Any]:
-    """占位实现，Module 19 替换为 6 维加权评分。"""
-    return {
-        "overall_score": 80,
-        "structure_completeness": 100,
-        "evidence_coverage": 80,
-        "codebase_coverage": 80,
-        "risk_transparency": 80,
-        "question_resolution": 80,
-        "recommendation_confidence": 80,
-        "score_delta": 0,
-        "reasons": [],
-        "next_actions": [],
-        "metadata": {},
-    }
-
-
-def validate_llm_verifier_output(payload: dict[str, Any]) -> dict[str, Any]:
-    """占位实现，Module 19 替换为 LLM 复核输出校验。"""
-    return {
-        "passed": True,
-        "confidence": 0.8,
-        "issues": [],
-        "suggested_next_actions": [],
-        "summary": "",
-    }
-
-
 # ---- end Module 19 占位 ----
 
 LANGGRAPH_NODE_ORDER = NODE_ORDER
