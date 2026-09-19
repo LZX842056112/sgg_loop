@@ -14,7 +14,9 @@ class SourceSnapshotRead(BaseModel):
     content_path: str | None
     metadata_json: dict
     skipped_items_json: list
+    error_message: str | None  # ← 新增
     created_at: datetime
+    updated_at: datetime  # ← 新增
 
     model_config = {"from_attributes": True}
 
@@ -31,7 +33,10 @@ class CodebaseMapRead(BaseModel):
     entrypoint_files_json: list
     readme_excerpt: str | None
     file_tree_json: list
+    skipped_items_json: list  # ← 新增
+    metadata_json: dict  # ← 新增
     created_at: datetime
+    updated_at: datetime  # ← 新增
 
     model_config = {"from_attributes": True}
 
