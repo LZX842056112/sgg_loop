@@ -6,6 +6,9 @@ SKIP_DIR_NAMES = {
 }
 SKIP_FILE_PATTERNS = {".pyc", ".pyo", ".so", ".dll", ".exe", ".bin"}
 MAX_FILE_BYTES_DEFAULT = 1_000_000
+SENSITIVE_EXACT_NAMES = {".env", "id_rsa"}
+SENSITIVE_PREFIXES = (".env.", "credentials.", "secrets.")
+SENSITIVE_SUFFIXES = (".key", ".pem")
 
 
 def should_skip_path(file_path: Path, root: Path, max_file_bytes: int) -> dict | None:
@@ -32,6 +35,14 @@ def should_skip_path(file_path: Path, root: Path, max_file_bytes: int) -> dict |
                 return {"path": str(relative), "reason": "file_too_large"}
         except OSError:
             return {"path": str(relative), "reason": "stat_failed"}
+
+    name = file_path.name.lower()
+    if (
+            name in SENSITIVE_EXACT_NAMES
+            or name.startswith(SENSITIVE_PREFIXES)
+            or name.endswith(SENSITIVE_SUFFIXES)
+    ):
+        return {"path": str(relative), "reason": "sensitive_path"}
 
     return None
 
